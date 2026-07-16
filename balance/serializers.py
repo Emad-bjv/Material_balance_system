@@ -49,8 +49,8 @@ class ContractorSerializer(serializers.ModelSerializer):
 # ─────────────────────────────────────────────────────────────────────────────
 class WorkCategorySerializer(serializers.ModelSerializer):
     materials_count = serializers.IntegerField(
-        source='materials.count',
         read_only=True,
+        default=0
     )
 
     class Meta:
@@ -168,6 +168,20 @@ class WarehouseTransactionSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("مقدار باید عددی بزرگ‌تر از صفر باشد.")
         return value
+
+
+class WarehouseTransactionListSerializer(WarehouseTransactionSerializer):
+    class Meta(WarehouseTransactionSerializer.Meta):
+        fields = [
+            'id',
+            'transaction_type', 'transaction_type_display',
+            'material', 'material_detail',
+            'quantity',
+            'bill_of_lading',
+            'contract_number', 'contract_subject',
+            'contractor', 'contractor_detail',
+            'date', 'created_at',
+        ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

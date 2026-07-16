@@ -197,7 +197,7 @@ class WarehouseTransaction(models.Model):
             if is_new:
                 diff = self.quantity
             else:
-                old_instance = WarehouseTransaction.objects.get(pk=self.pk)
+                old_instance = WarehouseTransaction.objects.only('quantity').get(pk=self.pk)
                 diff = self.quantity - old_instance.quantity
 
             if self.transaction_type == 'IN':

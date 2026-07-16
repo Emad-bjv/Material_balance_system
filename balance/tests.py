@@ -232,6 +232,40 @@ class BalanceMathTests(TestCase):
         self.assertEqual(response['Content-Type'], 'application/pdf')
         self.assertGreater(len(response.content), 0)
 
+    def test_update_transaction_signal(self):
+        # Create a contractor
+        contractor1 = Contractor.objects.create(first_name="تست", last_name="پیمانکار1")
+        contractor2 = Contractor.objects.create(first_name="تست", last_name="پیمانکار2")
+
+        # Create IN transaction to ensure stock exists
+        WarehouseTransaction.objects.create(
+            transaction_type='IN',
+            material=self.material,
+            quantity=Decimal('200.00'),
+            date=date.today()
+        )
+
+        # Create OUT transaction
+        tx = WarehouseTransaction.objects.create(
+            transaction_type='OUT',
+            material=self.material,
+            quantity=Decimal('100.00'),
+            contractor=contractor1,
+            contract_number="C-100",
+            contract_subject="Subj-100",
+            date=date.today()
+        )
+
+        # Update contractor and quantity to trigger the pre_save signal
+        tx.contractor = contractor2
+        tx.quantity = Decimal('120.00')
+        tx.save()
+
+        # Re-fetch transaction and assert contractor is updated
+        updated_tx = WarehouseTransaction.objects.get(pk=tx.pk)
+        self.assertEqual(updated_tx.contractor, contractor2)
+        self.assertEqual(updated_tx.quantity, Decimal('120.00'))
+
 
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
@@ -313,4 +347,115 @@ class MaterialAPITests(APITestCase):
         res_update = self.client.put(f"/api/materials/{second_id}/", update_data, format='json')
         self.assertEqual(res_update.status_code, status.HTTP_400_BAD_REQUEST)
 
+import io
+import openpyxl
+from django.urls import reverse
+from unittest.mock import patch
+
+class ExportPerformanceTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(username="exporttest", password="password", email="export@test.com")
+        self.user.role = "TECHNICAL"
+        self.user.save()
+        self.client.force_authenticate(user=self.user)
+        
+        self.category = WorkCategory.objects.create(name="پایپینگ")
+        self.material = MaterialItem.objects.create(
+            name="لوله", work_category=self.category, unit='M', waste_percentage=Decimal('10.00')
+        )
+        self.contractor = Contractor.objects.create(first_name="تست", last_name="پیمانکار")
+        
+        WarehouseTransaction.objects.create(
+            transaction_type='IN', material=self.material, quantity=Decimal('200'), date=date.today()
+        )
+        WarehouseTransaction.objects.create(
+            transaction_type='OUT', material=self.material, quantity=Decimal('100'),
+            contractor=self.contractor, date=date.today()
+        )
+        
+        from balance.models import GlobalMaterialBalance
+        GlobalMaterialBalance.objects.create(
+            contractor=self.contractor,
+            material=self.material,
+            allowed_waste=Decimal('10'),
+            approved_work=Decimal('0'),
+            total_issued=Decimal('100'),
+            balance=Decimal('-90'),
+            balance_label='بستانکار'
+        )
+
+    def test_csv_endpoint_validity(self):
+        url = reverse('balance-download-global-csv')
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, 200)
+        content = b"".join(res.streaming_content).decode('utf-8-sig')
+        lines = content.strip().split('\n')
+        self.assertEqual(len(lines), 2)  # Header + 1 row
+
+    def test_excel_write_only_validity(self):
+        wb_bytes = generate_global_material_balance_excel()
+        wb = openpyxl.load_workbook(io.BytesIO(wb_bytes))
+        ws = wb.active
+        rows = list(ws.rows)
+        self.assertGreater(len(rows), 2)
+        # Check that contractor name "تست پیمانکار" or "پیمانکار" is somewhere in the excel sheet
+        data_content = "".join([str(c.value) for r in rows for c in r if c.value])
+        self.assertIn("پیمانکار", data_content)
+
+    @patch('balance.services.get_global_material_balance_rows_data')
+    def test_pdf_row_cap_guard(self, mock_get_data):
+        from balance.pdf_service import generate_global_material_balance_pdf
+        # Mock returning 50001 rows
+        mock_get_data.return_value = [{} for _ in range(50001)]
+        
+        with self.assertRaisesMessage(ValueError, "تعداد ردیف‌ها بیش از حد مجاز برای تولید PDF است"):
+            generate_global_material_balance_pdf()
+
+
+class DashboardViewsTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(username="dashuser", password="password", email="dash@test.com")
+        self.user.role = "TECHNICAL"
+        self.user.save()
+        self.client.force_authenticate(user=self.user)
+
+        self.category = WorkCategory.objects.create(name="ابزاردقیق")
+        self.material = MaterialItem.objects.create(
+            name="کابل",
+            work_category=self.category,
+            unit="M",
+            waste_percentage=Decimal("2.00")
+        )
+        self.contractor = Contractor.objects.create(first_name="تست", last_name="پیمانکار")
+
+        # Add transaction IN
+        WarehouseTransaction.objects.create(
+            transaction_type='IN',
+            material=self.material,
+            quantity=Decimal('200.00'),
+            date=date.today()
+        )
+        # Add transaction OUT
+        WarehouseTransaction.objects.create(
+            transaction_type='OUT',
+            material=self.material,
+            quantity=Decimal('120.00'),
+            contractor=self.contractor,
+            date=date.today()
+        )
+
+    def test_dashboard_summary(self):
+        url = reverse('dashboard-summary')
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['total_in'].get('M'), 200.0)
+        self.assertEqual(res.data['total_out'].get('M'), 120.0)
+
+    def test_dashboard_charts(self):
+        url = reverse('dashboard-charts')
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('time_trends', res.data)
+        self.assertIn('material_distribution', res.data)
+        self.assertIn('balance_status', res.data)
 

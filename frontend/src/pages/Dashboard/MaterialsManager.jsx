@@ -30,12 +30,21 @@ const MaterialsManager = () => {
   
   const [loading, setLoading] = useState(false);
   const { showToast } = useToast();
+  
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const catRes = await api.get('categories/');
-      setCategories(catRes.data.results || catRes.data);
+      const catRes = await api.get(`categories/?page=${page}`);
+      if (catRes.data.results) {
+        setCategories(catRes.data.results);
+        setTotalCount(catRes.data.count);
+      } else {
+        setCategories(catRes.data);
+        setTotalCount(catRes.data.length);
+      }
     } catch (err) {
       console.error("Error fetching data", err);
     } finally {
@@ -45,7 +54,7 @@ const MaterialsManager = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [page]);
 
   const handleCatSubmit = async (e) => {
     e.preventDefault();
@@ -97,7 +106,7 @@ const MaterialsManager = () => {
           <div className="section-title" style={!isReadOnly ? { borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' } : {}}>
             <div className="section-title-icon">{Icons.folder}</div>
             لیست رسته‌ها
-            {!loading && <span style={{ marginRight: 'auto', fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 500 }}>{toPersianDigits(categories.length)} رسته</span>}
+            {!loading && <span style={{ marginRight: 'auto', fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 500 }}>{toPersianDigits(totalCount)} رسته</span>}
           </div>
           <div className="table-container" style={{ maxHeight: '600px', overflowY: 'auto' }}>
             {loading ? <SkeletonTable rows={3} cols={2} /> : (
@@ -125,6 +134,13 @@ const MaterialsManager = () => {
             </table>
             )}
           </div>
+          {totalCount > 10 && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px', gap: '10px' }}>
+              <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>قبلی</button>
+              <span style={{ padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)' }}>صفحه {toPersianDigits(page)}</span>
+              <button className="btn btn-secondary" disabled={page * 10 >= totalCount} onClick={() => setPage(page + 1)}>بعدی</button>
+            </div>
+          )}
         </div>
       </div>
     </div>

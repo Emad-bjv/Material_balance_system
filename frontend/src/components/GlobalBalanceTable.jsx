@@ -133,7 +133,12 @@ const GlobalBalanceTable = () => {
 
   const formatNumber = (num) => {
     if (typeof num !== 'number') return num;
-    return new Intl.NumberFormat('fa-IR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+    return new Intl.NumberFormat('fa-IR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(num);
+  };
+
+  const formatBalanceNumber = (num) => {
+    if (typeof num !== 'number') return num;
+    return new Intl.NumberFormat('fa-IR', { minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(num);
   };
 
   const formatInteger = (num) => {
@@ -308,7 +313,7 @@ const GlobalBalanceTable = () => {
                                 : 'var(--warning)'
                         }}
                       >
-                        {isStringBalance ? '—' : formatNumber(row.balance)}
+                        {isStringBalance ? '—' : formatBalanceNumber(row.balance)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <span className={`status-badge ${getStatusBadgeClass(row.balance_label)}`}>

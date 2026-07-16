@@ -114,7 +114,7 @@ const BalanceModal = ({ isOpen, onClose, contractorsSummary }) => {
 
     return (
       <div className={`balance-badge ${badgeClass}`}>
-        <span dir="ltr">{Number(value).toLocaleString('en-US', {maximumFractionDigits:2})}</span>
+        <span dir="ltr">{Number(value).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 1})}</span>
         <span>{unit}</span>
         <span style={{ fontSize: '0.72rem', opacity: 0.85, marginRight: '4px' }}>({icon})</span>
       </div>
@@ -292,11 +292,11 @@ const BalanceModal = ({ isOpen, onClose, contractorsSummary }) => {
                       <div className="stat-pill-group">
                         <div className="stat-pill out">
                           <span className="stat-label">تحویلی</span>
-                          <span className="stat-value">{Number(item.total_delivered).toLocaleString('en-US', {maximumFractionDigits:2})} {item.unit_str}</span>
+                          <span className="stat-value">{Number(item.total_delivered).toLocaleString('en-US', {maximumFractionDigits:0})} {item.unit_str}</span>
                         </div>
                         <div className="stat-pill appr">
                           <span className="stat-label">تاییدی</span>
-                          <span className="stat-value">{Number(item.total_approved).toLocaleString('en-US', {maximumFractionDigits:2})} {item.unit_str}</span>
+                          <span className="stat-value">{Number(item.total_approved).toLocaleString('en-US', {maximumFractionDigits:0})} {item.unit_str}</span>
                         </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -337,11 +337,11 @@ const BalanceModal = ({ isOpen, onClose, contractorsSummary }) => {
                     <div className="stat-pill-group">
                       <div className="stat-pill out">
                         <span className="stat-label">تحویلی</span>
-                        <span className="stat-value">{Number(item.total_delivered).toLocaleString('en-US', {maximumFractionDigits:2})} {item.unit}</span>
+                        <span className="stat-value">{Number(item.total_delivered).toLocaleString('en-US', {maximumFractionDigits:0})} {item.unit}</span>
                       </div>
                       <div className="stat-pill appr">
                         <span className="stat-label">تاییدی</span>
-                        <span className="stat-value">{Number(item.total_approved).toLocaleString('en-US', {maximumFractionDigits:2})} {item.unit}</span>
+                        <span className="stat-value">{Number(item.total_approved).toLocaleString('en-US', {maximumFractionDigits:0})} {item.unit}</span>
                       </div>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>

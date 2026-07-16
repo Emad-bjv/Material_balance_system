@@ -8,6 +8,14 @@ import { formatPersianNumber, toPersianDigits } from '../../utils/persianNumbers
 import Select from 'react-select';
 import CreatableSelect from 'react-select/creatable';
 
+const formatInputValue = (val) => {
+  if (val === null || val === undefined || val === '') return '';
+  const clean = val.toString().replace(/,/g, '');
+  const parts = clean.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+};
+
 const selectStyles = {
   control: (base) => ({
     ...base,
@@ -197,11 +205,49 @@ const ApprovalsManager = () => {
   }, [formData.contractor]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === 'approved_quantity') {
+      const rawVal = value.replace(/,/g, '');
+      if (/^[0-9.]*$/.test(rawVal)) {
+        const dots = (rawVal.match(/\./g) || []).length;
+        if (dots <= 1) {
+          setFormData(prev => ({
+            ...prev,
+            [name]: rawVal
+          }));
+        }
+      }
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.contractor) {
+      showToast('لطفا پیمانکار را انتخاب کنید.', 'error');
+      return;
+    }
+    if (!formData.material) {
+      showToast('لطفا متریال / کالا را انتخاب کنید.', 'error');
+      return;
+    }
+    if (!formData.approved_quantity) {
+      showToast('لطفا مقدار تایید شده را وارد کنید.', 'error');
+      return;
+    }
+    if (!formData.contract_number) {
+      showToast('لطفا شماره قرارداد را وارد یا انتخاب کنید.', 'error');
+      return;
+    }
+    if (!formData.contract_subject) {
+      showToast('لطفا موضوع قرارداد را وارد یا انتخاب کنید.', 'error');
+      return;
+    }
+    if (!formData.approval_date) {
+      showToast('لطفا تاریخ تایید را انتخاب کنید.', 'error');
+      return;
+    }
     setSubmitLoading(true);
     try {
       await api.post('approvals/', formData);
@@ -264,7 +310,7 @@ const ApprovalsManager = () => {
             <form onSubmit={handleSubmit} className="grid grid-cols-3">
           
           <div className="form-group">
-            <label className="form-label">پیمانکار</label>
+            <label className="form-label">پیمانکار <span style={{color: 'red'}}>*</span></label>
             <Select 
               styles={selectStyles}
               placeholder="انتخاب پیمانکار..."
@@ -283,7 +329,7 @@ const ApprovalsManager = () => {
           </div>
           
           <div className="form-group">
-            <label className="form-label">متریال / کالا</label>
+            <label className="form-label">متریال / کالا <span style={{color: 'red'}}>*</span></label>
             <Select 
               styles={selectStyles}
               placeholder="انتخاب متریال..."
@@ -312,12 +358,12 @@ const ApprovalsManager = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">مقدار تایید شده</label>
-            <input type="number" step="0.01" name="approved_quantity" className="form-control" value={formData.approved_quantity} onChange={handleChange} required />
+            <label className="form-label">مقدار تایید شده <span style={{color: 'red'}}>*</span></label>
+            <input type="text" name="approved_quantity" className="form-control" value={formatInputValue(formData.approved_quantity)} onChange={handleChange} required />
           </div>
 
           <div className="form-group">
-            <label className="form-label">شماره قرارداد</label>
+            <label className="form-label">شماره قرارداد <span style={{color: 'red'}}>*</span></label>
             <CreatableSelect 
               styles={selectStyles}
               placeholder="انتخاب یا ثبت جدید..."
@@ -341,7 +387,7 @@ const ApprovalsManager = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">موضوع قرارداد</label>
+            <label className="form-label">موضوع قرارداد <span style={{color: 'red'}}>*</span></label>
             <CreatableSelect 
               styles={selectStyles}
               placeholder="انتخاب یا ثبت موضوع..."
@@ -365,7 +411,7 @@ const ApprovalsManager = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label">تاریخ تایید</label>
+            <label className="form-label">تاریخ تایید <span style={{color: 'red'}}>*</span></label>
             <JalaliDatePicker 
               name="approval_date" 
               value={formData.approval_date} 
@@ -446,11 +492,11 @@ const ApprovalsManager = () => {
                       </td>
                       <td>
                         <span style={{ fontWeight: 700, color: 'var(--primary-500)' }}>
-                          {a.approved_quantity} {a.material_detail?.unit_display}
+                          {formatPersianNumber(a.approved_quantity)} {a.material_detail?.unit_display}
                         </span>
                       </td>
                       <td style={{ direction: 'ltr', textAlign: 'right' }}>{a.contract_number || '-'}</td>
-                      <td><span className="badge badge-warning">{a.allowed_waste}</span></td>
+                      <td><span className="badge badge-warning">{formatPersianNumber(a.allowed_waste)}</span></td>
                     </tr>
                   ))
                 )}

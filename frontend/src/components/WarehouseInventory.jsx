@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../services/api';
 import { SkeletonTable } from './Skeleton';
 import { formatPersianNumber } from '../utils/persianNumbers';
@@ -13,15 +14,23 @@ const Icons = {
 };
 
 const WarehouseInventory = ({ isModal = false, onClose }) => {
+  const [searchParams] = useSearchParams();
+  const searchVal = searchParams.get('search');
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(searchVal || '');
   const { showToast } = useToast();
   const { triggerExport } = useDownloadManager();
 
   useEffect(() => {
     fetchInventory();
   }, []);
+
+  useEffect(() => {
+    if (searchVal) {
+      setSearchTerm(searchVal);
+    }
+  }, [searchVal]);
 
   const fetchInventory = async () => {
     try {
@@ -42,10 +51,16 @@ const WarehouseInventory = ({ isModal = false, onClose }) => {
     triggerExport('warehouse_excel', {}, 'خروجی اکسل موجودی انبار');
   };
 
-  const filteredInventory = inventory.filter(item => 
-    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (item.work_category_name && item.work_category_name.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredInventory = inventory.filter(item => {
+    const s = searchTerm.toLowerCase();
+    return (
+      item.name.toLowerCase().includes(s) ||
+      (item.work_category_name && item.work_category_name.toLowerCase().includes(s)) ||
+      (item.size && item.size.toLowerCase().includes(s)) ||
+      (item.thickness && item.thickness.toLowerCase().includes(s)) ||
+      (item.material_type && item.material_type.toLowerCase().includes(s))
+    );
+  });
 
   const renderContent = () => (
     <div className="section-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', height: isModal ? 'auto' : '100%' }}>

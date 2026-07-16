@@ -1,6 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { AuthContext } from '../../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import UserProfileModal from '../../components/UserProfileModal';
 import TransactionForm from './TransactionForm';
 import TransactionList from './TransactionList';
@@ -9,6 +9,7 @@ import WarehouseInventory from '../../components/WarehouseInventory';
 import { useToast } from '../../contexts/ToastContext';
 import DownloadManagerDropdown from '../../components/DownloadManagerDropdown';
 import { useDownloadManager } from '../../contexts/DownloadContext';
+import NotificationBell from '../../components/NotificationBell';
 
 
 /* ─── SVG Icons ──────────────────────────────────────────────── */
@@ -44,9 +45,17 @@ const roleLabels = {
 const Warehouse = () => {
   const { user, logout } = useContext(AuthContext);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const searchVal = searchParams.get('search');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [showInventory, setShowInventory] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+  React.useEffect(() => {
+    if (searchVal) {
+      setShowInventory(true);
+    }
+  }, [searchVal]);
 
   const { showToast } = useToast();
   const { triggerExport } = useDownloadManager();
@@ -116,6 +125,7 @@ const Warehouse = () => {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <DownloadManagerDropdown />
+          <NotificationBell />
           {/* User Badge */}
           <div 
             className={`sidebar-user ${getRoleClass(user)}`} 

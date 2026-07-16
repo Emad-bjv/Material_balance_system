@@ -34,6 +34,7 @@ from .views import (
     technical_approval_summary,
     global_balance_rows,
     dashboard_charts,
+    global_balance_csv,
 )
 
 # ─── Router اصلی ─────────────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ urlpatterns = [
     path('balance/download-warehouse/', download_warehouse_inventory, name='balance-download-warehouse'),
     path('balance/download-contractors/', download_contractors, name='balance-download-contractors'),
     path('balance/download-approvals/', download_approvals, name='balance-download-approvals'),
+    path('balance/download-global-csv/', global_balance_csv, name='balance-download-global-csv'),
 
     # استعلام آمار زنده
     path('balance/material-inventory/', live_material_inventory, name='balance-live-inventory'),

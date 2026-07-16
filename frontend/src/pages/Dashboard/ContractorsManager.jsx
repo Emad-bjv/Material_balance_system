@@ -30,6 +30,9 @@ const ContractorsManager = () => {
   const isReadOnly = !user?.is_superuser;
 
   const [contractors, setContractors] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({ first_name: '', last_name: '' });
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -44,8 +47,14 @@ const ContractorsManager = () => {
   const fetchContractors = async () => {
     setLoading(true);
     try {
-      const response = await api.get('contractors/');
-      setContractors(response.data.results || response.data);
+      const response = await api.get(`contractors/?page=${page}&search=${search}`);
+      if (response.data.results) {
+        setContractors(response.data.results);
+        setTotalCount(response.data.count);
+      } else {
+        setContractors(response.data);
+        setTotalCount(response.data.length);
+      }
     } catch (err) {
       console.error("Error fetching contractors", err);
     } finally {
@@ -71,7 +80,7 @@ const ContractorsManager = () => {
 
   useEffect(() => {
     fetchContractors();
-  }, []);
+  }, [page, search]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -116,12 +125,6 @@ const ContractorsManager = () => {
           <h1 className="gradient-text">مدیریت پیمانکاران</h1>
           <p>افزودن، ویرایش و مشاهده لیست پیمانکاران پروژه</p>
         </div>
-        <div className="page-header-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button className="btn btn-excel" onClick={downloadReport}>
-            {Icons.download}
-            دانلود لیست
-          </button>
-        </div>
       </div>
 
       {/* Form Section */}
@@ -165,13 +168,29 @@ const ContractorsManager = () => {
 
       {/* List Section */}
       <div className="section-panel animate-in animate-in-delay-2">
-        <div className="section-title">
-          <div className="section-title-icon">
-            <svg width="16" height="16" fill="none" stroke="var(--primary-500)" strokeWidth="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M17 20h5V4H2v16h5M12 20v-8M7 20v-4M17 20v-4" />
+            </svg>
+            لیست پیمانکاران
+          </h2>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input 
+              type="text" 
+              placeholder="جستجو..." 
+              className="form-control"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              style={{ width: '200px', height: '40px' }}
+            />
+            <button className="btn btn-secondary" onClick={downloadReport} style={{ height: '40px' }}>
+              {Icons.download}
+              خروجی اکسل
+            </button>
           </div>
-          لیست پیمانکاران
-          {!loading && <span style={{ marginRight: 'auto', fontSize: '0.8rem', color: 'var(--text-dim)', fontWeight: 500 }}>{toPersianDigits(contractors.length)} پیمانکار</span>}
         </div>
+
         {loading ? (
           <SkeletonTable rows={4} cols={4} />
         ) : (
@@ -233,6 +252,13 @@ const ContractorsManager = () => {
             </table>
           </div>
         )}
+        {totalCount > 10 && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px', gap: '10px' }}>
+            <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(page - 1)}>قبلی</button>
+            <span style={{ padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)' }}>صفحه {toPersianDigits(page)}</span>
+            <button className="btn btn-secondary" disabled={page * 10 >= totalCount} onClick={() => setPage(page + 1)}>بعدی</button>
+          </div>
+        )}
       </div>
 
       {/* Contractor Details Modal */}
@@ -291,7 +317,7 @@ const ContractorsManager = () => {
                               )}
                             </td>
                             <td style={{ fontWeight: '600', direction: 'ltr', textAlign: 'right' }}>
-                              {formatPersianNumber(req.quantity, 2)} 
+                              {formatPersianNumber(req.quantity)} 
                               <span style={{ fontSize: '0.8rem', fontWeight: 'normal', color: 'var(--text-muted)', marginRight: '4px' }}>
                                 {req.material_detail?.unit_display || req.material_detail?.unit || ''}
                               </span>

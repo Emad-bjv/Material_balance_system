@@ -99,7 +99,7 @@ const DashboardOverview = () => {
   // Balance Modal States
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false);
 
-  const { triggerExport } = useDownloadManager();
+  const { triggerExport, exportTasks } = useDownloadManager();
 
 
   // Excel Modal State
@@ -570,7 +570,7 @@ const DashboardOverview = () => {
       {/* Header */}
       <div className="page-header animate-in" style={{ flexShrink: 0 }}>
         <div>
-          <h1 className="gradient-text">نمای کلی کارگاه</h1>
+          <h1 className="gradient-text">نمای کلی</h1>
           <p>خلاصه وضعیت موازنه متریال و عملکرد پیمانکاران</p>
         </div>
         <div className="page-header-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -582,10 +582,33 @@ const DashboardOverview = () => {
             {StatIcons.pdf}
             خروجی PDF
           </button>
-          <button className="btn btn-excel" onClick={() => downloadReport('global')}>
+          <button className="btn btn-excel" onClick={() => triggerExport('global_csv', {}, 'CSV موازنه کل')}>
             {StatIcons.download}
-            موازنه کل
+            CSV موازنه کل
           </button>
+          
+          {(() => {
+            const task = exportTasks.find(t => t.name === 'گزارش موازنه کل (اکسل)' && (t.status === 'PENDING' || t.status === 'PROCESSING'));
+            if (task) {
+              return (
+                <div style={{ width: '150px', background: 'var(--bg-card)', padding: '5px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                    <span>در حال پردازش</span>
+                    <span>{task.progress}%</span>
+                  </div>
+                  <div style={{ width: '100%', background: '#e0e0e0', height: '4px', borderRadius: '2px' }}>
+                    <div style={{ width: `${task.progress}%`, background: 'var(--primary-500)', height: '100%', borderRadius: '2px', transition: 'width 0.3s' }}></div>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <button className="btn btn-excel" onClick={() => downloadReport('global')}>
+                {StatIcons.download}
+                موازنه کل
+              </button>
+            );
+          })()}
         </div>
       </div>
 
@@ -598,7 +621,6 @@ const DashboardOverview = () => {
               {StatIcons.inbound}
             </div>
           </div>
-          {renderCardUnits(data?.total_in)}
         </div>
 
         <div className="kpi-card glow-warning interactive" onClick={handleOpenOutboundModal}>
@@ -608,7 +630,6 @@ const DashboardOverview = () => {
               {StatIcons.outbound}
             </div>
           </div>
-          {renderCardUnits(data?.total_out)}
         </div>
 
         <div className="kpi-card glow-success interactive" onClick={handleOpenApprovalsModal}>
@@ -618,7 +639,6 @@ const DashboardOverview = () => {
               {StatIcons.approved}
             </div>
           </div>
-          {renderCardUnits(data?.total_approved)}
         </div>
 
         <div className="kpi-card glow-warning interactive" onClick={() => setIsBalanceModalOpen(true)}>
@@ -628,7 +648,6 @@ const DashboardOverview = () => {
               {StatIcons.balance}
             </div>
           </div>
-          {renderCardUnits(balanceObj, true)}
         </div>
       </div>
 

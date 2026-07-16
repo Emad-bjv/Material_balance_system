@@ -16,6 +16,7 @@ export const DownloadProvider = ({ children }) => {
   });
 
   const exportTasksRef = useRef([]);
+  const socketsRef = useRef({});
   useEffect(() => {
     exportTasksRef.current = exportTasks;
     localStorage.setItem('download-manager-tasks', JSON.stringify(exportTasks));
@@ -73,100 +74,150 @@ export const DownloadProvider = ({ children }) => {
     fetchActiveTasks();
   }, []);
 
-  // Polling logic for running tasks
+  const reconnectAttemptsRef = useRef({});
+  const pollingIntervalsRef = useRef({});
+
+  const startHttpPolling = (taskId) => {
+    if (pollingIntervalsRef.current[taskId]) return;
+    pollingIntervalsRef.current[taskId] = setInterval(async () => {
+      try {
+        const res = await api.get(`balance/export-status/${taskId}/`);
+        const data = res.data;
+        setExportTasks(prev => {
+          const idx = prev.findIndex(t => t.id === taskId);
+          if (idx === -1) return prev;
+          const currentItem = prev[idx];
+          if (data.status === 'SUCCESS' && currentItem.status !== 'SUCCESS' && !currentItem.downloaded) {
+            const link = document.createElement('a');
+            link.href = data.file_url;
+            link.setAttribute('download', '');
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            showToast(`${currentItem.name} با موفقیت دانلود شد.`, 'success');
+            clearInterval(pollingIntervalsRef.current[taskId]);
+            delete pollingIntervalsRef.current[taskId];
+            const updated = [...prev];
+            updated[idx] = { ...currentItem, status: 'SUCCESS', progress: 100, file_url: data.file_url, downloaded: true };
+            return updated;
+          }
+          if (data.status === 'FAILURE' && currentItem.status !== 'FAILURE') {
+            clearInterval(pollingIntervalsRef.current[taskId]);
+            delete pollingIntervalsRef.current[taskId];
+            const updated = [...prev];
+            updated[idx] = { ...currentItem, status: 'FAILURE', progress: 0, error_message: data.error_message };
+            return updated;
+          }
+          const updated = [...prev];
+          updated[idx] = { ...currentItem, status: data.status, progress: data.progress || currentItem.progress, eta: data.eta, phase: data.phase };
+          return updated;
+        });
+      } catch (e) { /* silent */ }
+    }, 3000);
+  };
+
+  // WebSocket logic for running tasks
   useEffect(() => {
     const runningTasks = exportTasks.filter(t => t.status === 'PENDING' || t.status === 'PROCESSING');
+    
+    const runningTaskIds = new Set(runningTasks.map(t => t.id));
+    Object.keys(socketsRef.current).forEach(id => {
+      if (!runningTaskIds.has(id)) {
+        socketsRef.current[id].close();
+        delete socketsRef.current[id];
+        delete reconnectAttemptsRef.current[id];
+        if (pollingIntervalsRef.current[id]) {
+          clearInterval(pollingIntervalsRef.current[id]);
+          delete pollingIntervalsRef.current[id];
+        }
+      }
+    });
+
     if (runningTasks.length === 0) return;
 
-    const interval = setInterval(async () => {
-      let updatedList = [...exportTasksRef.current];
-      let hasChanges = false;
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8000/api/`;
+    const wsBaseUrl = API_BASE.replace('http://', 'ws://').replace('https://', 'wss://').replace('/api/', '/ws/');
 
-      const promises = runningTasks.map(async (task) => {
+    const connectWs = (task) => {
+      if (socketsRef.current[task.id]) return;
+
+      const token = localStorage.getItem('access_token');
+      const wsUrl = `${wsBaseUrl}tasks/${task.id}/?token=${token || ''}`;
+      const socket = new WebSocket(wsUrl);
+      socketsRef.current[task.id] = socket;
+
+      socket.onmessage = (event) => {
         try {
-          const res = await api.get(`balance/export-status/${task.id}/`);
-          const latest = res.data;
-          
-          const idx = updatedList.findIndex(t => t.id === task.id);
-          if (idx !== -1) {
-            const currentItem = updatedList[idx];
+          const data = JSON.parse(event.data);
+          reconnectAttemptsRef.current[task.id] = 0;
+          setExportTasks(prev => {
+            const idx = prev.findIndex(t => t.id === task.id);
+            if (idx === -1) return prev;
             
-            let errorText = '';
-            let name = currentItem.name;
-            if (latest.error_message) {
-              try {
-                const meta = JSON.parse(latest.error_message);
-                name = meta.name || name;
-                errorText = meta.error || '';
-              } catch (e) {
-                errorText = latest.error_message;
-              }
+            const currentItem = prev[idx];
+            let newStatus = data.status || currentItem.status;
+            let newProgress = data.progress !== undefined ? data.progress : currentItem.progress;
+            let fileUrl = data.file_url || currentItem.file_url;
+            let errorMsg = data.error_message || currentItem.error_message;
+            let eta = data.eta !== undefined ? data.eta : currentItem.eta;
+            let phase = data.phase || currentItem.phase;
+
+            if (data.status === 'SUCCESS' && currentItem.status !== 'SUCCESS' && !currentItem.downloaded) {
+              const link = document.createElement('a');
+              link.href = fileUrl;
+              link.setAttribute('download', '');
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              showToast(`${currentItem.name} با موفقیت دانلود شد.`, 'success');
+              const updated = [...prev];
+              updated[idx] = { ...currentItem, status: 'SUCCESS', progress: 100, file_url: fileUrl, downloaded: true, phase: 'تکمیل شد' };
+              return updated;
+            } else if (data.status === 'FAILURE' && currentItem.status !== 'FAILURE') {
+              showToast(`خطا در تولید فایل ${currentItem.name}: ${errorMsg}`, 'error');
+              const updated = [...prev];
+              updated[idx] = { ...currentItem, status: 'FAILURE', progress: 0, error_message: errorMsg };
+              return updated;
             }
 
-            // Check if status changed
-            if (latest.status !== currentItem.status || 
-                latest.progress !== currentItem.progress || 
-                latest.eta !== currentItem.eta || 
-                latest.file_url !== currentItem.file_url ||
-                errorText !== currentItem.error_message) {
-              
-              hasChanges = true;
-              
-              // Handle first time success (auto trigger download)
-              if (latest.status === 'SUCCESS' && currentItem.status !== 'SUCCESS' && !currentItem.downloaded) {
-                const link = document.createElement('a');
-                link.href = latest.file_url;
-                link.setAttribute('download', '');
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                showToast(`${name} با موفقیت دانلود شد.`, 'success');
-                
-                updatedList[idx] = {
-                  ...currentItem,
-                  status: latest.status,
-                  progress: 100,
-                  eta: 0,
-                  file_url: latest.file_url,
-                  downloaded: true,
-                  name: name
-                };
-              } else if (latest.status === 'FAILURE' && currentItem.status !== 'FAILURE') {
-                showToast(`خطا در تولید فایل ${name}: ${errorText}`, 'error');
-                updatedList[idx] = {
-                  ...currentItem,
-                  status: latest.status,
-                  progress: 0,
-                  eta: 0,
-                  error_message: errorText,
-                  name: name
-                };
-              } else {
-                updatedList[idx] = {
-                  ...currentItem,
-                  status: latest.status,
-                  progress: latest.progress || 0,
-                  eta: latest.eta || 0,
-                  file_url: latest.file_url,
-                  name: name
-                };
-              }
-            }
-          }
+            const updated = [...prev];
+            updated[idx] = { ...currentItem, status: newStatus, progress: newProgress, file_url: fileUrl, error_message: errorMsg, eta, phase };
+            return updated;
+          });
         } catch (err) {
-          console.error('Error polling status for task ' + task.id, err);
+          console.error("Error parsing websocket message", err);
         }
-      });
+      };
 
-      await Promise.all(promises);
+      socket.onclose = () => {
+        delete socketsRef.current[task.id];
+        const attempts = (reconnectAttemptsRef.current[task.id] || 0) + 1;
+        reconnectAttemptsRef.current[task.id] = attempts;
+        
+        const currentTask = exportTasksRef.current.find(t => t.id === task.id);
+        if (!currentTask || currentTask.status === 'SUCCESS' || currentTask.status === 'FAILURE' || currentTask.status === 'CANCELLED') return;
 
-      if (hasChanges) {
-        setExportTasks(updatedList);
-      }
-    }, 2000);
+        if (attempts <= 5) {
+          const delay = Math.min(1000 * Math.pow(2, attempts - 1), 8000);
+          setTimeout(() => connectWs(task), delay);
+        } else {
+          startHttpPolling(task.id);
+        }
+      };
 
-    return () => clearInterval(interval);
+      socket.onerror = () => {};
+    };
+
+    runningTasks.forEach(task => connectWs(task));
   }, [exportTasks]);
+
+  // Clean up all connections on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(socketsRef.current).forEach(s => s.close());
+      Object.values(pollingIntervalsRef.current).forEach(id => clearInterval(id));
+    };
+  }, []);
 
   // Queue scheduler logic
   useEffect(() => {
@@ -209,6 +260,8 @@ export const DownloadProvider = ({ children }) => {
         endpoint = 'balance/download-contractors/';
       } else if (task.type === 'approvals_excel') {
         endpoint = 'balance/download-approvals/';
+      } else if (task.type === 'global_csv') {
+        endpoint = 'balance/download-global-csv/';
       }
 
       const isAsync = task.type === 'global_excel' || task.type === 'global_pdf';
@@ -239,6 +292,7 @@ export const DownloadProvider = ({ children }) => {
         else if (task.type === 'warehouse_excel') filename = 'warehouse_inventory.xlsx';
         else if (task.type === 'contractors_excel') filename = 'contractors_list.xlsx';
         else if (task.type === 'approvals_excel') filename = 'approvals_list.xlsx';
+        else if (task.type === 'global_csv') filename = 'global_material_balance.csv';
         
         link.setAttribute('download', filename);
         document.body.appendChild(link);
@@ -271,6 +325,7 @@ export const DownloadProvider = ({ children }) => {
     if (type === 'warehouse_excel') return 'خروجی اکسل موجودی انبار';
     if (type === 'contractors_excel') return 'خروجی اکسل لیست پیمانکاران';
     if (type === 'approvals_excel') return 'خروجی اکسل لیست تاییدیه‌ها';
+    if (type === 'global_csv') return 'خروجی CSV موازنه کل';
     if (type === 'balance_excel') return 'گزارش موازنه (اکسل)';
     if (type === 'balance_pdf') return 'گزارش موازنه (PDF)';
     return 'گزارش خروجی';

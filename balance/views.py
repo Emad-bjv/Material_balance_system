@@ -24,6 +24,7 @@ from .serializers import (
     WorkCategorySerializer,
     MaterialItemSerializer,
     WarehouseTransactionSerializer,
+    WarehouseTransactionListSerializer,
     TechnicalOfficeApprovalSerializer,
     AuditLogSerializer,
 )
@@ -164,12 +165,21 @@ class ContractorViewSet(AuditMixin, viewsets.ModelViewSet):
     transaction_count با annotate محاسبه می‌شود (بدون N+1 Query).
     """
     serializer_class = ContractorSerializer
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        # annotate برای جلوگیری از N+1 - یک کوئری به جای N کوئری
-        return Contractor.objects.annotate(
+        qs = Contractor.objects.annotate(
             transaction_count=Count('warehousetransaction')
         ).order_by('first_name', 'last_name')
+        
+        search = self.request.query_params.get('search')
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search)
+            )
+        return qs
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve', 'received_materials'):
@@ -190,8 +200,18 @@ class ContractorViewSet(AuditMixin, viewsets.ModelViewSet):
 # ۱. رستهٔ کاری (WorkCategory)
 # ─────────────────────────────────────────────────────────────────────────────
 class WorkCategoryViewSet(AuditMixin, viewsets.ModelViewSet):
-    queryset = WorkCategory.objects.all().order_by('name')
     serializer_class = WorkCategorySerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        qs = WorkCategory.objects.annotate(
+            materials_count=Count('materials')
+        ).order_by('name')
+        
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(name__icontains=search)
+        return qs
 
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
@@ -204,10 +224,20 @@ class WorkCategoryViewSet(AuditMixin, viewsets.ModelViewSet):
 # ─────────────────────────────────────────────────────────────────────────────
 class MaterialItemViewSet(AuditMixin, viewsets.ModelViewSet):
     serializer_class = MaterialItemSerializer
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         qs = MaterialItem.objects.select_related('work_category').order_by('name')
         params = self.request.query_params
+
+        search = params.get('search')
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(name__icontains=search) |
+                Q(size__icontains=search) |
+                Q(material_type__icontains=search)
+            )
 
         category_id = params.get('category')
         unit = params.get('unit')
@@ -269,6 +299,11 @@ class WarehouseTransactionViewSet(AuditMixin, viewsets.ModelViewSet):
     serializer_class = WarehouseTransactionSerializer
     pagination_class = StandardResultsSetPagination
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return WarehouseTransactionListSerializer
+        return super().get_serializer_class()
+
     def get_permissions(self):
         if self.action in ('list', 'retrieve'):
             return [IsAuthenticated()]
@@ -277,7 +312,10 @@ class WarehouseTransactionViewSet(AuditMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = WarehouseTransaction.objects.select_related(
             'material', 'material__work_category', 'contractor'
-        ).order_by('-date', '-created_at')
+        ).order_by('-created_at')
+
+        if self.action == 'list':
+            qs = qs.defer('bill_of_lading_image', 'exit_document_image')
 
         params = self.request.query_params
 
@@ -374,7 +412,7 @@ class TechnicalOfficeApprovalViewSet(AuditMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = TechnicalOfficeApproval.objects.select_related(
             'contractor', 'material', 'material__work_category'
-        ).order_by('-approval_date', '-created_at')
+        ).order_by('-created_at')
 
         user = self.request.user
         if getattr(user, 'role', None) == 'WAREHOUSE':
@@ -544,11 +582,20 @@ def export_task_status(request, task_id):
     from django.shortcuts import get_object_or_404
 
     task = get_object_or_404(ExportTask, pk=task_id)
+    phase = None
+    if task.status in ('PENDING', 'PROCESSING'):
+        if task.progress < 20:
+            phase = 'در حال خواندن دیتابیس...'
+        elif task.progress < 95:
+            phase = 'در حال ساخت فایل اکسل...'
+        else:
+            phase = 'در حال نهایی‌سازی فایل...'
     return Response({
         'task_id': str(task.id),
         'status': task.status,
         'progress': task.progress,
         'eta': task.eta,
+        'phase': phase,
         'file_url': task.file_url,
         'error_message': task.error_message,
         'created_at': task.created_at
@@ -709,15 +756,20 @@ def dashboard_summary(request):
     تولید دیتای داشبورد برای فرانت‌اند (مخصوص دفتر فنی).
     شامل مجموع ورودی، خروجی، کارهای تایید شده و موازنه پیمانکاران.
     """
-    total_in_qs = WarehouseTransaction.objects.filter(transaction_type='IN') \
-        .values('material__unit') \
-        .annotate(total=Sum('quantity'))
-    total_in = {item['material__unit']: float(item['total']) for item in total_in_qs}
+    from django.core.cache import cache
+    
+    cached_data = cache.get('dashboard_summary_data')
+    if cached_data:
+        return Response(cached_data)
 
-    total_out_qs = WarehouseTransaction.objects.filter(transaction_type='OUT') \
-        .values('material__unit') \
-        .annotate(total=Sum('quantity'))
-    total_out = {item['material__unit']: float(item['total']) for item in total_out_qs}
+    from django.db.models import Case, When, Value, Sum, F, DecimalField
+
+    tx_summary = WarehouseTransaction.objects.values('material__unit').annotate(
+        total_in=Sum(Case(When(transaction_type='IN', then=F('quantity')), default=0, output_field=DecimalField())),
+        total_out=Sum(Case(When(transaction_type='OUT', then=F('quantity')), default=0, output_field=DecimalField()))
+    )
+    total_in = {item['material__unit']: float(item['total_in']) for item in tx_summary if item['total_in']}
+    total_out = {item['material__unit']: float(item['total_out']) for item in tx_summary if item['total_out']}
 
     total_approved_qs = TechnicalOfficeApproval.objects \
         .values('material__unit') \
@@ -725,12 +777,14 @@ def dashboard_summary(request):
     total_approved = {item['material__unit']: float(item['total']) for item in total_approved_qs}
 
     summary = get_contractors_balance_summary()
-    return Response({
+    data = {
         'total_in': total_in,
         'total_out': total_out,
         'total_approved': total_approved,
         'contractors': summary
-    })
+    }
+    cache.set('dashboard_summary_data', data, timeout=None)
+    return Response(data)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # دانلود خروجی‌های اکسل جدید
@@ -752,6 +806,110 @@ def download_approvals(request):
     if not throttle.allow_request(request, None):
         return Response({'detail': 'تعداد درخواست‌ها بیش از حد مجاز است.'}, status=429)
     return get_approvals_excel_response(is_superuser=request.user.is_superuser)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ۹. دانلود خروجی CSV موازنه کل (سریع‌ترین مسیر برای داده‌های کامل)
+# ─────────────────────────────────────────────────────────────────────────────
+@api_view(['GET'])
+@permission_classes([IsAuthenticated, CanDownloadBalanceReport])
+def global_balance_csv(request):
+    """
+    خروجی CSV کامل موازنه کل کارگاه با StreamingHttpResponse.
+    سریع‌ترین مسیر برای دانلود تمام داده‌ها بدون نیاز به Celery.
+    """
+    import csv
+    from django.http import StreamingHttpResponse
+    from .models import GlobalMaterialBalance
+
+    throttle = DownloadReportThrottle()
+    if not throttle.allow_request(request, None):
+        return Response(
+            {'detail': 'تعداد درخواست‌های دانلود شما بیش از حد مجاز است. لطفاً بعداً مجدداً تلاش کنید.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    UNIT_MAP = {
+        'KG': 'کیلوگرم',
+        'M': 'متر',
+        'SQM': 'متر مربع',
+        'PCS': 'عدد',
+    }
+
+    # هدرهای CSV
+    CSV_HEADERS = [
+        'پیمانکار', 'شماره قرارداد', 'موضوع قرارداد', 'رسته کاری',
+        'نام کالا', 'سایز', 'جنس', 'ضخامت', 'واحد',
+        'کل متریال تحویلی', 'مقدار کار تاییدشده', 'درصد پرتی (%)',
+        'پرتی مجاز', 'موازنه (انحراف)', 'وضعیت نهایی',
+    ]
+
+    def csv_generator():
+        """Generator یکایک ردیف‌ها را تولید و stream می‌کند."""
+        # BOM برای UTF-8 (جهت نمایش صحیح فارسی در اکسل)
+        yield '\ufeff'
+
+        # نوشتن هدر
+        pseudo_buffer = _Echo()
+        writer = csv.writer(pseudo_buffer)
+        yield writer.writerow(CSV_HEADERS)
+
+        # خواندن داده‌ها با server-side cursor
+        qs = GlobalMaterialBalance.objects.select_related(
+            'contractor', 'material', 'material__work_category'
+        ).order_by(
+            'contractor__first_name', 'contractor__last_name',
+            'material__name', 'contract_number', 'contract_subject'
+        ).values(
+            'contractor__first_name', 'contractor__last_name',
+            'material__name', 'material__size', 'material__material_type',
+            'material__thickness', 'material__unit', 'material__waste_percentage',
+            'material__work_category__name',
+            'contract_number', 'contract_subject',
+            'total_issued', 'approved_work', 'allowed_waste',
+            'balance', 'balance_label'
+        ).iterator(chunk_size=5000)
+
+        for row in qs:
+            first_name = row['contractor__first_name'] or ''
+            last_name = row['contractor__last_name'] or ''
+            full_name = f"{first_name} {last_name}".strip() or "—"
+
+            balance_val = row['balance']
+            if balance_val is not None:
+                balance_display = float(balance_val)
+            else:
+                balance_display = "در دست بررسی"
+
+            csv_row = [
+                full_name,
+                row['contract_number'] or "—",
+                row['contract_subject'] or "—",
+                row['material__work_category__name'] or "—",
+                row['material__name'],
+                row['material__size'] or "—",
+                row['material__material_type'] or "—",
+                row['material__thickness'] or "—",
+                UNIT_MAP.get(row['material__unit'], row['material__unit'] or "—"),
+                float(row['total_issued']),
+                float(row['approved_work']),
+                float(row['material__waste_percentage'] or 0),
+                float(row['allowed_waste']),
+                balance_display,
+                row['balance_label'],
+            ]
+            yield writer.writerow(csv_row)
+
+    response = StreamingHttpResponse(csv_generator(), content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = 'attachment; filename="global_material_balance.csv"'
+    return response
+
+
+class _Echo:
+    """شیء کمکی برای csv.writer — متد write فقط مقدار را برمی‌گرداند."""
+    def write(self, value):
+        return value
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # استعلام آمارهای زنده (برای فرم‌های تاییدیه و خروج انبار)
@@ -842,17 +1000,16 @@ def live_contractor_material_received(request):
 def system_notifications(request):
     """
     لیست هشدارهای سیستم:
-    - متریال‌های با موجودی بحرانی (زیر آستانه)
+    - متریال‌های با موجودی بحرانی (کمتر از ۱۰ درصد کل ورودی)
     """
     notifications = []
 
-    # ─── هشدارهای موجودی بحرانی ────────────────────────────────────────────
-    from django.db.models import Sum, F, Q, Value, DecimalField
+    from django.db.models import Sum, Q, Value, DecimalField
     from django.db.models.functions import Coalesce
+    from .models import MaterialItem
 
-    materials_with_threshold = MaterialItem.objects.filter(
-        low_stock_threshold__gt=0
-    ).select_related('work_category').annotate(
+    # دریافت کل متریال‌ها با محاسبات ورودی و خروجی
+    materials = MaterialItem.objects.select_related('work_category').annotate(
         total_in=Coalesce(
             Sum('transactions__quantity', filter=Q(transactions__transaction_type='IN')),
             Value(0, output_field=DecimalField())
@@ -863,19 +1020,38 @@ def system_notifications(request):
         )
     )
 
-    for mat in materials_with_threshold:
+    for mat in materials:
         current_stock = mat.total_in - mat.total_out
-
-        if current_stock <= mat.low_stock_threshold:
-            notifications.append({
-                'type': 'LOW_STOCK',
-                'severity': 'critical' if current_stock <= 0 else 'warning',
-                'title': f'موجودی بحرانی: {mat.name}',
-                'message': f'موجودی فعلی {current_stock} {mat.get_unit_display()} — آستانه: {mat.low_stock_threshold} {mat.get_unit_display()}',
-                'material_id': mat.id,
-                'current_stock': float(current_stock),
-                'threshold': float(mat.low_stock_threshold),
-            })
+        
+        # فقط در صورتی که ورودی ثبت شده باشد
+        if mat.total_in > 0:
+            percentage_left = (current_stock / mat.total_in) * 100
+            
+            # اگر موجودی به زیر ۱۰ درصد کل ورودی رسید یا به اتمام رسید
+            if percentage_left < 10 or current_stock <= 0:
+                specs_list = [mat.size, mat.thickness, mat.material_type]
+                specs_str = " / ".join(filter(None, specs_list))
+                full_name = f"{mat.name} ({specs_str})" if specs_str else mat.name
+                
+                severity = 'critical' if current_stock <= 0 else 'warning'
+                title = f'موجودی رو به اتمام: {mat.name}'
+                
+                if current_stock <= 0:
+                    message = f'موجودی این کالا به اتمام رسیده است. ({full_name})'
+                else:
+                    message = f'تنها {percentage_left:.1f}٪ از این کالا در انبار باقی مانده است. ({full_name} — موجودی: {current_stock} از کل: {mat.total_in})'
+                
+                notifications.append({
+                    'type': 'LOW_STOCK',
+                    'severity': severity,
+                    'title': title,
+                    'message': message,
+                    'material_id': mat.id,
+                    'material_name': mat.name,
+                    'current_stock': float(current_stock),
+                    'total_in': float(mat.total_in),
+                    'percentage_left': float(percentage_left),
+                })
 
     return Response({
         'count': len(notifications),
@@ -905,19 +1081,10 @@ def audit_logs_list(request):
     if model_filter:
         qs = qs.filter(model_name__icontains=model_filter)
 
-    # محدودیت تعداد (پیش‌فرض ۵۰)
-    limit = request.GET.get('limit', '50')
-    try:
-        limit = min(int(limit), 200)
-    except ValueError:
-        limit = 50
-
-    qs = qs[:limit]
-    serializer = AuditLogSerializer(qs, many=True)
-    return Response({
-        'count': len(serializer.data),
-        'results': serializer.data,
-    })
+    paginator = StandardResultsSetPagination()
+    paginated_qs = paginator.paginate_queryset(qs, request)
+    serializer = AuditLogSerializer(paginated_qs, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
 @api_view(['GET'])
@@ -1124,7 +1291,7 @@ def dashboard_charts(request):
     """
     import jdatetime
     from datetime import timedelta
-    from django.db.models import Q, F, Value, DecimalField
+    from django.db.models import Q, F, Value, DecimalField, Case, When, Sum, Count
     from django.db.models.functions import Coalesce
     from collections import defaultdict
 
@@ -1181,12 +1348,14 @@ def dashboard_charts(request):
     outbound_by_date = defaultdict(float)
     approved_by_date = defaultdict(float)
 
-    for tx in tx_qs.values('date', 'transaction_type').annotate(total=Sum('quantity')):
-        date_str = str(tx['date'])
-        if tx['transaction_type'] == 'IN':
-            inbound_by_date[date_str] += float(tx['total'])
-        else:
-            outbound_by_date[date_str] += float(tx['total'])
+    tx_trends = tx_qs.values('date').annotate(
+        inbound_total=Sum(Case(When(transaction_type='IN', then=F('quantity')), default=0, output_field=DecimalField())),
+        outbound_total=Sum(Case(When(transaction_type='OUT', then=F('quantity')), default=0, output_field=DecimalField()))
+    )
+    for row in tx_trends:
+        date_str = str(row['date'])
+        inbound_by_date[date_str] = float(row['inbound_total'] or 0)
+        outbound_by_date[date_str] = float(row['outbound_total'] or 0)
 
     for ap in approval_qs.values('approval_date').annotate(total=Sum('approved_quantity')):
         date_str = str(ap['approval_date'])
@@ -1291,27 +1460,31 @@ def dashboard_charts(request):
     if unit_filter:
         balance_qs = balance_qs.filter(material__unit=unit_filter)
 
-    label_counts = defaultdict(int)
+    counts = balance_qs.aggregate(
+        debtor=Count(Case(When(balance_label__in=['بدهکار', 'مازاد دریافت'], then=Value(1)))),
+        creditor=Count(Case(When(balance_label__in=['بستانکار', 'کسری'], then=Value(1)))),
+        cleared=Count(Case(When(balance_label='تسویه', then=Value(1)))),
+        under_review=Count(Case(When(balance_label__in=['در حال بررسی', 'بدون تاییدیه'], then=Value(1)))),
+    )
+
     balance_details = []
     for row in balance_qs.values(
         'contractor__first_name', 'contractor__last_name',
         'material__name', 'balance', 'balance_label'
-    ):
-        label = row['balance_label']
-        label_counts[label] += 1
+    )[:50]:
         balance_details.append({
             'contractor': f"{row['contractor__first_name']} {row['contractor__last_name']}",
             'material': row['material__name'],
             'balance': float(row['balance'] or 0),
-            'label': label,
+            'label': row['balance_label'],
         })
 
     balance_status = {
-        'debtor': label_counts.get('بدهکار', 0) + label_counts.get('مازاد دریافت', 0),
-        'creditor': label_counts.get('بستانکار', 0) + label_counts.get('کسری', 0),
-        'cleared': label_counts.get('تسویه', 0),
-        'under_review': label_counts.get('در حال بررسی', 0) + label_counts.get('بدون تاییدیه', 0),
-        'details': balance_details[:50],  # Limit to prevent huge payloads
+        'debtor': counts['debtor'],
+        'creditor': counts['creditor'],
+        'cleared': counts['cleared'],
+        'under_review': counts['under_review'],
+        'details': balance_details,
     }
 
     # ─── 5. Inventory Status ───────────────────────────────────────

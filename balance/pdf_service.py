@@ -251,170 +251,93 @@ def get_balance_pdf_response(contractor_ids=None, material_ids=None, from_date=N
 def generate_global_material_balance_pdf(is_superuser=False, task_id=None, resume_from=None) -> bytes:
     """
     تولید گزارش PDF موازنه کل کارگاه به صورت ناهمگام با استفاده از جدول پیش‌محاسبه‌شده.
+    نسخه بهینه‌شده (Phase 7):
+    ۱. خطای بیش از ۵۰,۰۰۰ ردیف
+    ۲. تولید PDFها در بخش‌های ۱,۰۰۰ ردیفی و ادغام آن‌ها با pypdf
+    ۳. پشتیبانی از resume با بررسی فایل‌های chunk از قبل تولید شده
     """
     from .services import get_global_material_balance_rows_data
     import os
-    import pickle
+    import time
     from django.conf import settings
+    from pypdf import PdfWriter
+    import shutil
+    
     register_fonts()
-    
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer, 
-        pagesize=landscape(A4),
-        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30,
-        title="گزارش موازنه متریال کل"
-    )
-    
-    elements = []
-    
-    # ─── استایل‌ها ────────────────────────────────────────────────────────────
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'PersianTitle',
-        parent=styles['Title'],
-        fontName='Vazir-Bold' if 'Vazir-Bold' in pdfmetrics.getRegisteredFontNames() else 'Helvetica',
-        fontSize=18,
-        alignment=1, # Center
-        spaceAfter=20
-    )
-    
-    header_style = ParagraphStyle(
-        'PersianHeader',
-        fontName='Vazir' if 'Vazir' in pdfmetrics.getRegisteredFontNames() else 'Helvetica',
-        fontSize=12,
-        alignment=2, # Right
-        spaceAfter=15
-    )
-    
-    # ─── هدر گزارش ────────────────────────────────────────────────────────────
-    current_date = jdatetime.datetime.now().strftime('%Y/%m/%d %H:%M')
-    
-    elements.append(Paragraph(persian_text("گزارش رسمی موازنه متریال کل پروژه جهان‌پارس"), title_style))
-    elements.append(Paragraph(persian_text(f"تاریخ تهیه گزارش: {current_date}"), header_style))
-    elements.append(Paragraph(persian_text("حوزه گزارش: موازنه کل (به تفکیک تمامی پیمانکاران)"), header_style))
-    elements.append(Spacer(1, 20))
     
     # دریافت داده‌ها از جدول پیش‌محاسبه‌شده
     rows = get_global_material_balance_rows_data()
     total_rows = len(rows)
     
-    # هدر جدول
-    header_row = [
-        persian_text('موازنه نهایی'),
-        persian_text('پرتی مجاز'),
-        persian_text('کار تایید شده'),
-        persian_text('دریافتی از انبار'),
-        persian_text('واحد'),
-        persian_text('متریال'),
-        persian_text('پیمانکار')
-    ]
+    # ── ۱. سقف تعداد ردیف‌ها (۵۰,۰۰۰ ردیف) ──
+    MAX_PDF_ROWS = 50000
+    if total_rows > MAX_PDF_ROWS:
+        raise ValueError("تعداد ردیف‌ها بیش از حد مجاز برای تولید PDF است (حداکثر ۵۰,۰۰۰). لطفاً از خروجی اکسل یا CSV استفاده نمایید.")
     
+    if total_rows == 0:
+        # فایل خالی
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        styles = getSampleStyleSheet()
+        elements = [Paragraph(persian_text("هیچ رکوردی یافت نشد"), ParagraphStyle('P', fontName='Vazir' if 'Vazir' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'))]
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    # ── ۲. استایل‌های مشترک ──
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'PersianTitle', parent=styles['Title'],
+        fontName='Vazir-Bold' if 'Vazir-Bold' in pdfmetrics.getRegisteredFontNames() else 'Helvetica',
+        fontSize=18, alignment=1, spaceAfter=20
+    )
+    header_style = ParagraphStyle(
+        'PersianHeader',
+        fontName='Vazir' if 'Vazir' in pdfmetrics.getRegisteredFontNames() else 'Helvetica',
+        fontSize=12, alignment=2, spaceAfter=15
+    )
+
     font_name = 'Vazir' if 'Vazir' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
     font_bold = 'Vazir-Bold' if 'Vazir-Bold' in pdfmetrics.getRegisteredFontNames() else font_name
-    
+
+    header_row = [
+        persian_text('موازنه نهایی'), persian_text('پرتی مجاز'), persian_text('کار تایید شده'),
+        persian_text('تحویلی از انبار'), persian_text('واحد'), persian_text('متریال'), persian_text('پیمانکار')
+    ]
+
     base_table_style = [
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4f46e5')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('FONTNAME', (0, 0), (-1, 0), font_bold),
-        ('FONTSIZE', (0, 0), (-1, 0), 11),
-        ('TOPPADDING', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 14),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
         ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#1e293b')),
         ('FONTNAME', (0, 1), (-1, -1), font_name),
-        ('FONTSIZE', (0, 1), (-1, -1), 9),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
     ]
-    
-    import time
-    start_time = time.time()
-    
-    # آرایه برای انباشت داده‌های آماده‌شده
+
+    # ── ۳. آماده‌سازی داده‌ها (Formatting) ──
     formatted_data = []
-    start_idx = 0
     
-    if resume_from:
-        temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_exports')
-        if os.path.exists(temp_dir):
-            temp_file = None
-            for f in os.listdir(temp_dir):
-                if f.startswith(f"temp_{resume_from}_") and f.endswith(".pkl"):
-                    temp_file = os.path.join(temp_dir, f)
-                    try:
-                        start_idx = int(f.split("_")[2].split(".")[0]) + 1
-                    except ValueError:
-                        start_idx = 0
-                    break
-            
-            if temp_file and start_idx > 0 and start_idx < total_rows:
-                try:
-                    with open(temp_file, 'rb') as pf:
-                        formatted_data = pickle.load(pf)
-                except Exception:
-                    formatted_data = []
-                    start_idx = 0
-    
-    for idx in range(start_idx, total_rows):
-        row = rows[idx]
-        if task_id and total_rows > 0 and (idx % 500 == 0 or idx == total_rows - 1):
-            progress_pct = int(((idx + 1) / total_rows) * 90) # اختصاص ۹۰ درصد به آماده‌سازی داده‌ها
-            elapsed = time.time() - start_time
-            avg_time_per_row = elapsed / (idx - start_idx + 1) if (idx - start_idx) > 0 else 0.001
-            remaining_rows = total_rows - (idx + 1)
-            eta_seconds = int(remaining_rows * avg_time_per_row) + 5
-            
+    for idx, row in enumerate(rows):
+        if task_id and idx % 500 == 0:
             from .models import ExportTask
             task_obj = ExportTask.objects.filter(pk=task_id).first()
-            
-            # Check for cancellation or pause first
             if task_obj and task_obj.status not in ('PENDING', 'PROCESSING'):
-                # Save temp file immediately before aborting
-                temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_exports')
-                os.makedirs(temp_dir, exist_ok=True)
-                for f in os.listdir(temp_dir):
-                    if f.startswith(f"temp_{task_id}_") and f.endswith(".pkl"):
-                        try:
-                            os.remove(os.path.join(temp_dir, f))
-                        except Exception:
-                            pass
-                temp_file_path = os.path.join(temp_dir, f"temp_{task_id}_{idx}.pkl")
-                try:
-                    with open(temp_file_path, 'wb') as pf:
-                        pickle.dump(formatted_data, pf)
-                except Exception:
-                    pass
                 raise ValueError("توسط کاربر لغو شد.")
-                
-            ExportTask.objects.filter(pk=task_id).update(progress=progress_pct, eta=eta_seconds)
-            
-            # Periodic saving (every 3000 rows) to minimize disk writes
-            if idx % 3000 == 0 or idx == total_rows - 1:
-                temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_exports')
-                os.makedirs(temp_dir, exist_ok=True)
-                for f in os.listdir(temp_dir):
-                    if f.startswith(f"temp_{task_id}_") and f.endswith(".pkl"):
-                        try:
-                            os.remove(os.path.join(temp_dir, f))
-                        except Exception:
-                            pass
-                temp_file_path = os.path.join(temp_dir, f"temp_{task_id}_{idx}.pkl")
-                try:
-                    with open(temp_file_path, 'wb') as pf:
-                        pickle.dump(formatted_data, pf)
-                except Exception:
-                    pass
-            
+
         balance_val = row['balance']
         if isinstance(balance_val, (int, float)):
             balance_str = "{:,.2f}".format(balance_val).rstrip('0').rstrip('.')
-            if balance_val > 0:
-                balance_str = f"{balance_str} +"
+            if balance_val > 0: balance_str = f"{balance_str} +"
         else:
             balance_str = str(balance_val)
             
@@ -423,66 +346,94 @@ def generate_global_material_balance_pdf(is_superuser=False, task_id=None, resum
         total_issued_str = "{:,.2f}".format(row['total_issued']).rstrip('0').rstrip('.')
         
         pdf_row = [
-            persian_text(balance_str),
-            persian_text(allowed_waste_str),
-            persian_text(approved_work_str),
-            persian_text(total_issued_str),
-            persian_text(row['unit']),
-            persian_text(row['material_name']),
+            persian_text(balance_str), persian_text(allowed_waste_str), persian_text(approved_work_str),
+            persian_text(total_issued_str), persian_text(row['unit']), persian_text(row['material_name']),
             persian_text(row['contractor_name'])
         ]
         formatted_data.append(pdf_row)
-        
-    if not formatted_data:
-        formatted_data.append([persian_text('هیچ رکوردی یافت نشد'), '', '', '', '', '', ''])
 
-    # بخش‌بندی داده‌های جدول جهت بهینه‌سازی سرعت خروجی ReportLab و جلوگیری از خطای کمبود حافظه
-    # داده‌ها را به قطعات ۱۰۰۰ سطری تقسیم می‌کنیم و هر قطعه را به عنوان یک جدول جداگانه اضافه می‌کنیم.
-    chunk_size = 1000
-    for chunk_start in range(0, len(formatted_data), chunk_size):
-        chunk_end = chunk_start + chunk_size
-        chunk_rows = formatted_data[chunk_start:chunk_end]
-        
-        # ترکیب هدر با داده‌های قطعه
-        table_content = [header_row] + chunk_rows
-        
-        table = Table(table_content, colWidths=[90, 80, 80, 80, 60, 200, 150])
-        
-        # استایل جداگانه برای هر جدول
-        table_style = list(base_table_style)
-        
-        # رنگ‌بندی شرطی ستون موازنه
-        for j, pdf_row in enumerate(chunk_rows):
-            row_idx = j + 1
-            # بررسی جهت رنگ ستون موازنه (pdf_row[0] همان موازنه نهایی است)
-            val_str = pdf_row[0]
-            if '+' in val_str:  # مازاد دریافت (بدهکار) -> قرمز
-                table_style.append(('TEXTCOLOR', (0, row_idx), (0, row_idx), colors.HexColor('#dc2626')))
-                table_style.append(('FONTNAME', (0, row_idx), (0, row_idx), font_bold))
-            elif val_str.strip() != '0.00' and val_str.strip() != '0' and val_str.strip() != persian_text('هیچ رکوردی یافت نشد'):  # کسری (بستانکار) -> سبز
-                table_style.append(('TEXTCOLOR', (0, row_idx), (0, row_idx), colors.HexColor('#16a34a')))
-                table_style.append(('FONTNAME', (0, row_idx), (0, row_idx), font_bold))
-                
-        table.setStyle(TableStyle(table_style))
-        elements.append(table)
-        elements.append(Spacer(1, 15))
-        
-    # Clean up temp files for this task and resume_from task on success
-    temp_dir = os.path.join(settings.MEDIA_ROOT, 'temp_exports')
-    if os.path.exists(temp_dir):
-        for f in os.listdir(temp_dir):
-            if f.startswith(f"temp_{task_id}_") or (resume_from and f.startswith(f"temp_{resume_from}_")):
-                try:
-                    os.remove(os.path.join(temp_dir, f))
-                except Exception:
-                    pass
+    # ── ۴. Chunk and Merge تولید ──
+    CHUNK_SIZE = 1000
+    merger = PdfWriter()
+    
+    target_task_id = resume_from if resume_from else task_id
+    chunks_dir = os.path.join(settings.MEDIA_ROOT, 'temp_exports', 'chunks', str(target_task_id))
+    os.makedirs(chunks_dir, exist_ok=True)
 
-    if task_id:
-        from .models import ExportTask
-        ExportTask.objects.filter(pk=task_id).update(progress=95, eta=2)
+    try:
+        total_chunks = (total_rows + CHUNK_SIZE - 1) // CHUNK_SIZE
+        chunk_files_in_order = []
         
-    # ساخت فایل PDF نهایی
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer.getvalue()
+        for chunk_idx in range(total_chunks):
+            chunk_start = chunk_idx * CHUNK_SIZE
+            chunk_end = min(chunk_start + CHUNK_SIZE, total_rows)
+            chunk_rows = formatted_data[chunk_start:chunk_end]
+            
+            chunk_path = os.path.join(chunks_dir, f"chunk_{chunk_idx}.pdf")
+            chunk_files_in_order.append(chunk_path)
+            
+            # آپدیت پیشرفت کل
+            if task_id:
+                progress_pct = int((chunk_end / total_rows) * 90)
+                from .models import ExportTask
+                ExportTask.objects.filter(pk=task_id).update(progress=progress_pct)
+            
+            # پشتیبانی از Resume
+            if os.path.exists(chunk_path):
+                continue
+            
+            # تولید فایل PDF قطعه
+            doc = SimpleDocTemplate(chunk_path, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+            elements = []
+            
+            # اضافه کردن هدر فقط برای فایل اول
+            if chunk_idx == 0:
+                current_date = jdatetime.datetime.now().strftime('%Y/%m/%d %H:%M')
+                elements.append(Paragraph(persian_text("گزارش رسمی موازنه متریال کل پروژه جهان‌پارس"), title_style))
+                elements.append(Paragraph(persian_text(f"تاریخ تهیه گزارش: {current_date}"), header_style))
+                elements.append(Spacer(1, 20))
+
+            table_content = [header_row] + chunk_rows
+            table = Table(table_content, colWidths=[90, 80, 80, 80, 60, 200, 150])
+            
+            # استایل شرطی
+            table_style = list(base_table_style)
+            for j, pdf_row in enumerate(chunk_rows):
+                row_idx = j + 1
+                val_str = pdf_row[0]
+                if '+' in val_str:
+                    table_style.append(('TEXTCOLOR', (0, row_idx), (0, row_idx), colors.HexColor('#dc2626')))
+                    table_style.append(('FONTNAME', (0, row_idx), (0, row_idx), font_bold))
+                elif val_str.strip() not in ('0.00', '0', persian_text('هیچ رکوردی یافت نشد')):
+                    table_style.append(('TEXTCOLOR', (0, row_idx), (0, row_idx), colors.HexColor('#16a34a')))
+                    table_style.append(('FONTNAME', (0, row_idx), (0, row_idx), font_bold))
+            
+            table.setStyle(TableStyle(table_style))
+            elements.append(table)
+            
+            # ساخت Chunk
+            doc.build(elements)
+
+        # ادغام قطعات
+        for chunk_path in chunk_files_in_order:
+            merger.append(chunk_path)
+
+        # آپدیت نهایی و ساخت بافر برگشتی
+        if task_id:
+            from .models import ExportTask
+            ExportTask.objects.filter(pk=task_id).update(progress=95)
+            
+        output_buffer = io.BytesIO()
+        merger.write(output_buffer)
+        output_buffer.seek(0)
+        return output_buffer.getvalue()
+
+    finally:
+        # ── ۵. پاکسازی فایل‌های موقت ──
+        merger.close()
+        try:
+            if os.path.exists(chunks_dir):
+                shutil.rmtree(chunks_dir)
+        except Exception:
+            pass
 

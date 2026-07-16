@@ -55,7 +55,7 @@ const toPersianDigits = (input) => {
 // فرمت‌کننده هزارگان با تبدیل نهایی به حروف فارسی
 const formatNum = (num) => {
   if (num === null || num === undefined || isNaN(num)) return toPersianDigits('0');
-  const formatted = Number(num).toLocaleString('en-US');
+  const formatted = Number(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
   return toPersianDigits(formatted);
 };
 

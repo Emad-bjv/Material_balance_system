@@ -152,7 +152,7 @@ const TransactionList = ({ refreshTrigger }) => {
                     ) : null}
                   </td>
                   <td>
-                    <span style={{ fontWeight: 700, color: 'var(--primary-500)' }}>{formatPersianNumber(tx.quantity, 2)}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--primary-500)' }}>{formatPersianNumber(tx.quantity)}</span>
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginRight: '4px' }}>{tx.material_detail?.unit_display}</span>
                   </td>
                   <td style={{ direction: 'ltr', textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>{toPersianDate(tx.date)}</td>

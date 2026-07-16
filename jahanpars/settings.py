@@ -37,6 +37,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['127.0.0.1', 'localhost'])
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -85,6 +86,18 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'jahanpars.wsgi.application'
+ASGI_APPLICATION = 'jahanpars.asgi.application'
+
+# ─── Caching (Redis) ────────────────────────────────────────────────────────
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': env('REDIS_URL', default='redis://127.0.0.1:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
 
 
 # Database
@@ -111,6 +124,14 @@ if 'sqlite' in DATABASES['default']['ENGINE']:
             'mmap_size': 268435456,         # 256MB Mmap
         }
     }
+
+# ─── محافظت پروداکشن: جلوگیری از اجرا با SQLite ──────────────────────────
+if not DEBUG and 'sqlite' in DATABASES['default']['ENGINE']:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        'SQLite is not supported in production. '
+        'Please set DATABASE_URL to a PostgreSQL connection string.'
+    )
 
 
 # Password validation
@@ -218,3 +239,36 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Tehran'
 
+
+# ─── Channels Configuration ─────────────────────────────────────────────────
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [env('REDIS_URL', default='redis://127.0.0.1:6379/2')],
+        },
+    },
+}
+
+
+# ─── MinIO / S3 Object Storage (اختیاری) ────────────────────────────────────
+# اگر هر ۴ متغیر محیطی تنظیم شده باشد، فایل‌های خروجی روی MinIO/S3 ذخیره می‌شوند.
+# در غیر این صورت، از MEDIA_ROOT محلی استفاده خواهد شد.
+MINIO_ENDPOINT = env('MINIO_ENDPOINT', default='')
+MINIO_ACCESS_KEY = env('MINIO_ACCESS_KEY', default='')
+MINIO_SECRET_KEY = env('MINIO_SECRET_KEY', default='')
+MINIO_BUCKET = env('MINIO_BUCKET', default='jahanpars-exports')
+
+EXPORT_STORAGE = None  # پیش‌فرض: دیسک محلی
+if MINIO_ENDPOINT and MINIO_ACCESS_KEY and MINIO_SECRET_KEY and MINIO_BUCKET:
+    from jahanpars.storage import AutoCreateS3Storage
+    EXPORT_STORAGE = AutoCreateS3Storage(
+        access_key=MINIO_ACCESS_KEY,
+        secret_key=MINIO_SECRET_KEY,
+        bucket_name=MINIO_BUCKET,
+        endpoint_url=MINIO_ENDPOINT,
+        querystring_auth=True,
+        querystring_expire=3600,
+        default_acl=None,
+        file_overwrite=True,
+    )

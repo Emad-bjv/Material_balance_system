@@ -138,9 +138,13 @@ const DownloadManagerDropdown = () => {
                       <div className="task-item-details">
                         <span className="task-item-name" title={task.name}>{task.name}</span>
                         <div className="task-item-meta">
-                          <span className="task-item-status">{getStatusLabel(task.status)}</span>
-                          {task.status === 'PROCESSING' && task.progress > 0 && (
-                            <span className="task-item-eta"> (زمان باقی‌مانده: {formatEta(task.eta)})</span>
+                          <span className="task-item-status">
+                            {(task.status === 'PROCESSING' || task.status === 'PENDING') && task.phase
+                              ? task.phase
+                              : getStatusLabel(task.status)}
+                          </span>
+                          {(task.status === 'PROCESSING' || task.status === 'PENDING') && task.eta > 0 && (
+                            <span className="task-item-eta"> (زمان باقیمانده: {formatEta(task.eta)})</span>
                           )}
                         </div>
                       </div>

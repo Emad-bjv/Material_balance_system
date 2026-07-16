@@ -5,6 +5,14 @@ import JalaliDatePicker from '../../components/JalaliDatePicker';
 import Select from 'react-select';
 import DocumentScanner, { ScanButton } from '../../components/DocumentScanner';
 
+const formatInputValue = (val) => {
+  if (val === null || val === undefined || val === '') return '';
+  const clean = val.toString().replace(/,/g, '');
+  const parts = clean.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+};
+
 const selectStyles = {
   control: (base) => ({
     ...base,
@@ -180,21 +188,47 @@ const TransactionForm = ({ onSuccess }) => {
   }, [formData.transaction_type, formData.material]);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    if (name === 'quantity') {
+      const rawVal = value.replace(/,/g, '');
+      if (/^[0-9.]*$/.test(rawVal)) {
+        const dots = (rawVal.match(/\./g) || []).length;
+        if (dots <= 1) {
+          setFormData(prev => ({
+            ...prev,
+            [name]: rawVal
+          }));
+        }
+      }
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (formData.transaction_type === 'IN') {
+      if (!formData.mat_work_category) {
+        showToast('لطفا رسته کاری متریال را انتخاب کنید.', 'error');
+        return;
+      }
+      if (!formData.mat_unit) {
+        showToast('لطفا واحد اندازه‌گیری متریال را انتخاب کنید.', 'error');
+        return;
+      }
       if (!scannedInbound) {
         showToast('لطفا تصویر بارنامه را اسکن یا بارگذاری کنید.', 'error');
         return;
       }
     } else if (formData.transaction_type === 'OUT') {
+      if (!formData.contractor) {
+        showToast('لطفا پیمانکار را انتخاب کنید.', 'error');
+        return;
+      }
       if (!scannedOutbound) {
         showToast('لطفا تصویر برگه خروج را اسکن یا بارگذاری کنید.', 'error');
         return;
@@ -480,7 +514,7 @@ const TransactionForm = ({ onSuccess }) => {
               </div>
               <div className="form-group">
                 <label className="form-label">مقدار / تعداد <span style={{color: 'red'}}>*</span></label>
-                <input type="number" step="0.01" name="quantity" className="form-control" value={formData.quantity} onChange={handleChange} required />
+                <input type="text" name="quantity" className="form-control" value={formatInputValue(formData.quantity)} onChange={handleChange} required />
               </div>
               <div className="form-group">
                 <label className="form-label">تاریخ ثبت <span style={{color: 'red'}}>*</span></label>
@@ -610,7 +644,7 @@ const TransactionForm = ({ onSuccess }) => {
               {outForm.unit !== null && (
                 <div className="form-group">
                   <label className="form-label">مقدار / تعداد خروج <span style={{color: 'red'}}>*</span></label>
-                  <input type="number" step="0.01" name="quantity" className="form-control" value={formData.quantity} onChange={handleChange} required />
+                  <input type="text" name="quantity" className="form-control" value={formatInputValue(formData.quantity)} onChange={handleChange} required />
                   {liveInventory !== null && formData.material && (
                     <div className="live-indicator live-success" style={{marginTop: '0.8rem'}}>
                       <span className="live-indicator-dot"></span>

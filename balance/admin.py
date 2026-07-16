@@ -19,8 +19,8 @@ from .models import User, Contractor, WorkCategory, MaterialItem, WarehouseTrans
 # ─────────────────────────────────────────────────────────────────────────────
 # تنظیمات کلی پنل مدیریت
 # ─────────────────────────────────────────────────────────────────────────────
-admin.site.site_header = "سیستم موازنه متریال جهانپارس"
-admin.site.site_title  = "پنل مدیریت جهانپارس"
+admin.site.site_header = "سیستم موازنه متریال"
+admin.site.site_title  = "پنل مدیریت"
 admin.site.index_title = "خوش آمدید! از منوی زیر بخش مورد نظر را انتخاب کنید."
 # Template سفارشی صفحه اصلی ادمین (تریک پیشرفت recursion: نام فایل متفاوت است از index.html)
 admin.site.index_template = 'admin/custom_index.html'

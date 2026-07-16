@@ -1,7 +1,11 @@
 from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
+from django.core.cache import cache
 from .models import WarehouseTransaction, TechnicalOfficeApproval, MaterialItem
 from .services import update_global_balance_for_key, recalculate_all_balances_for_material
+
+def invalidate_dashboard_cache():
+    cache.delete('dashboard_summary_data')
 
 
 @receiver(pre_save, sender=WarehouseTransaction)
@@ -11,7 +15,7 @@ def store_old_transaction_fields(sender, instance, **kwargs):
     """
     if instance.pk:
         try:
-            old_inst = WarehouseTransaction.objects.get(pk=instance.pk)
+            old_inst = WarehouseTransaction.objects.only('contractor', 'material', 'contract_number', 'contract_subject').get(pk=instance.pk)
             instance._old_key = (
                 old_inst.contractor_id,
                 old_inst.material_id,
@@ -44,6 +48,8 @@ def update_balance_on_transaction_save(sender, instance, created, **kwargs):
     # اگر فیلدهای کلید تغییر کرده بودند، کلید قبلی را هم به‌روزرسانی می‌کنیم
     if hasattr(instance, '_old_key') and instance._old_key and instance._old_key != key:
         update_global_balance_for_key(*instance._old_key)
+        
+    invalidate_dashboard_cache()
 
 
 @receiver(post_delete, sender=WarehouseTransaction)
@@ -61,6 +67,7 @@ def update_balance_on_transaction_delete(sender, instance, **kwargs):
         instance.contract_subject or ''
     )
     update_global_balance_for_key(*key)
+    invalidate_dashboard_cache()
 
 
 @receiver(pre_save, sender=TechnicalOfficeApproval)
@@ -100,6 +107,8 @@ def update_balance_on_approval_save(sender, instance, created, **kwargs):
     # اگر فیلدهای کلید تغییر کرده بودند، کلید قبلی را هم به‌روزرسانی می‌کنیم
     if hasattr(instance, '_old_key') and instance._old_key and instance._old_key != key:
         update_global_balance_for_key(*instance._old_key)
+        
+    invalidate_dashboard_cache()
 
 
 @receiver(post_delete, sender=TechnicalOfficeApproval)
@@ -114,6 +123,7 @@ def update_balance_on_approval_delete(sender, instance, **kwargs):
         instance.contract_subject or ''
     )
     update_global_balance_for_key(*key)
+    invalidate_dashboard_cache()
 
 
 @receiver(pre_save, sender=MaterialItem)
@@ -138,3 +148,4 @@ def update_balance_on_material_save(sender, instance, created, **kwargs):
     """
     if not created and hasattr(instance, '_old_waste_percentage') and instance._old_waste_percentage != instance.waste_percentage:
         recalculate_all_balances_for_material(instance.id)
+        invalidate_dashboard_cache()

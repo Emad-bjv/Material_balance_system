@@ -165,8 +165,8 @@ const DashboardLayout = () => {
 
         {/* Brand */}
         <div className="sidebar-brand">
-          <h2 className="brand-full">Jahan Pars</h2>
-          <h2 className="brand-mini">JP</h2>
+          <h2 className="brand-full">MBS</h2>
+          <h2 className="brand-mini">MBS</h2>
           <p className="brand-full">Material Balance System</p>
         </div>
 

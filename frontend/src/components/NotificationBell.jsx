@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { toPersianDigits, formatPersianNumber } from '../utils/persianNumbers';
+import { AuthContext } from '../contexts/AuthContext';
 
 /* ─── SVG Icons ──────────────────────────────────────────────── */
 const BellIcon = ({ hasNotif }) => (
@@ -17,10 +19,22 @@ const WarningIcon = () => (
 );
 
 const NotificationBell = ({ placement = 'bottom' }) => {
+  const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
+
+  const handleNotifClick = (notif) => {
+    setIsOpen(false);
+    const searchParam = `?search=${encodeURIComponent(notif.material_name)}`;
+    if (window.location.pathname.startsWith('/warehouse') || user?.role === 'WAREHOUSE') {
+      navigate(`/warehouse${searchParam}`);
+    } else {
+      navigate(`/dashboard/inventory${searchParam}`);
+    }
+  };
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -94,6 +108,8 @@ const NotificationBell = ({ placement = 'bottom' }) => {
                 <div
                   key={idx}
                   className={`notification-item notification-${notif.severity}`}
+                  onClick={() => handleNotifClick(notif)}
+                  style={{ cursor: 'pointer' }}
                 >
                   <div className="notification-item-icon">
                     <WarningIcon />

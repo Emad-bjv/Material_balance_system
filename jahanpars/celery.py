@@ -14,3 +14,8 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 
 # Load task modules from all registered Django apps.
 app.autodiscover_tasks()
+
+# ─── Export task isolation ──────────────────────────────────────────────────
+app.conf.task_routes = {'balance.tasks.*': {'queue': 'exports'}}
+app.conf.task_acks_late = True
+app.conf.worker_prefetch_multiplier = 1
