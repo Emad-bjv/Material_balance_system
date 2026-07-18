@@ -177,7 +177,7 @@ const JalaliDatePicker = ({ value, onChange, name, placeholder = 'انتخاب �
                           fontSize: '0.8rem',
                           cursor: 'pointer',
                           textAlign: 'right',
-                          backgroundColor: currentJalali.jm === index + 1 ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                          backgroundColor: currentJalali.jm === index + 1 ? 'rgba(43, 168, 162, 0.15)' : 'transparent',
                           color: currentJalali.jm === index + 1 ? 'var(--primary-500)' : 'var(--text-main)',
                           fontWeight: currentJalali.jm === index + 1 ? 'bold' : 'normal',
                           transition: 'background var(--duration-fast)'
@@ -246,7 +246,7 @@ const JalaliDatePicker = ({ value, onChange, name, placeholder = 'انتخاب �
                           fontSize: '0.8rem',
                           cursor: 'pointer',
                           textAlign: 'center',
-                          backgroundColor: currentJalali.jy === year ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                          backgroundColor: currentJalali.jy === year ? 'rgba(43, 168, 162, 0.15)' : 'transparent',
                           color: currentJalali.jy === year ? 'var(--primary-500)' : 'var(--text-main)',
                           fontWeight: currentJalali.jy === year ? 'bold' : 'normal',
                           transition: 'background var(--duration-fast)'

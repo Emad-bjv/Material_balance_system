@@ -5,9 +5,9 @@
   background: linear-gradient(
     -45deg,
     var(--bg-surface-solid) 0%,
-    rgba(99, 102, 241, 0.06) 25%,
-    rgba(99, 102, 241, 0.12) 50%,
-    rgba(99, 102, 241, 0.06) 75%,
+    rgba(43, 168, 162, 0.06) 25%,
+    rgba(43, 168, 162, 0.12) 50%,
+    rgba(43, 168, 162, 0.06) 75%,
     var(--bg-surface-solid) 100%
   );
   background-size: 400% 100%;
@@ -18,11 +18,11 @@
 [data-theme='dark'] .skeleton-loader {
   background: linear-gradient(
     -45deg,
-    rgba(22, 19, 52, 0.8) 0%,
-    rgba(129, 140, 248, 0.06) 25%,
-    rgba(129, 140, 248, 0.12) 50%,
-    rgba(129, 140, 248, 0.06) 75%,
-    rgba(22, 19, 52, 0.8) 100%
+    rgba(10, 31, 30, 0.8) 0%,
+    rgba(60, 196, 189, 0.06) 25%,
+    rgba(60, 196, 189, 0.12) 50%,
+    rgba(60, 196, 189, 0.06) 75%,
+    rgba(10, 31, 30, 0.8) 100%
   );
   background-size: 400% 100%;
 }

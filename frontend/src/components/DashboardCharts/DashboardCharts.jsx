@@ -483,10 +483,10 @@ const DashboardCharts = ({ contractors = [], materials = [] }) => {
     return (
       <div>
         {criticalItems.length > 0 && (
-          <div className="chart-card" style={{ marginBottom: '1.5rem', borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+          <div className="chart-card" style={{ marginBottom: '1.5rem', borderColor: 'rgba(239, 108, 74, 0.2)' }}>
             <div className="chart-card-title" style={{ color: CHART_COLORS.danger }}>
               ⚠️ موجودی بحرانی (پایین‌تر از حد آستانه)
-              <span className="chart-badge" style={{ color: CHART_COLORS.danger, background: 'rgba(239, 68, 68, 0.1)' }}>
+              <span className="chart-badge" style={{ color: CHART_COLORS.danger, background: 'rgba(239, 108, 74, 0.1)' }}>
                 {toPersianDigits(criticalItems.length)} مورد
               </span>
             </div>
